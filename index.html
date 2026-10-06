@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Matrix</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#0b0b0c;color:#ddd;font-family:Inter,Segoe UI,Arial,sans-serif}body{display:flex;justify-content:center}.app{width:100%;max-width:760px;height:100%;display:flex;flex-direction:column;background:#0b0b0c}.top{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #252526}.brand{font-size:15px;font-weight:600;color:#eee}.actions{display:flex;gap:7px}.icon{width:30px;height:30px;border:1px solid #303033;background:#151516;color:#aaa;border-radius:7px;cursor:pointer;font-size:13px}.icon:hover{background:#1d1d1f;color:#eee}.messages{flex:1;overflow:auto;padding:18px 16px 10px;scroll-behavior:smooth}.empty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center}.empty h1{font-size:20px;font-weight:500;color:#d8d8d8;margin:0 0 7px}.empty p{font-size:12px;color:#666;margin:0}.row{display:flex;margin:0 0 16px}.row.user{justify-content:flex-end}.user .bubble{max-width:78%;background:#202022;border:1px solid #2c2c2f;border-radius:13px;padding:8px 11px;color:#e5e5e5;font-size:13px;line-height:1.45;white-space:pre-wrap}.assistant .bubble{max-width:90%;padding:1px 0;color:#aaa;font-size:13px;line-height:1.55;white-space:pre-wrap}.assistant.error .bubble{color:#c9c9c9}.composer-wrap{padding:9px 12px 12px}.composer{display:flex;align-items:flex-end;gap:7px;border:1px solid #303033;background:#121213;border-radius:11px;padding:7px}.composer textarea{flex:1;resize:none;min-height:32px;max-height:120px;border:0;outline:0;background:transparent;color:#eee;font:13px/1.45 inherit;padding:6px 5px}.composer textarea::placeholder{color:#5e5e61}.send{width:32px;height:32px;border:0;border-radius:8px;background:#dedede;color:#111;cursor:pointer;font-size:14px}.send:hover{background:#fff}.send:disabled{opacity:.35;cursor:default}.status{text-align:center;font-size:10px;color:#555;margin-top:5px;min-height:12px}@media(max-width:600px){.messages{padding-left:12px;padding-right:12px}.composer-wrap{padding-left:8px;padding-right:8px}.user .bubble{max-width:86%}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<header class="top"><div class="brand">Matrix</div><div class="actions"><button class="icon" id="minBtn" title="Minimize">—</button><button class="icon" id="closeBtn" title="Close">×</button></div></header>
+<main class="messages" id="messages"><div class="empty" id="empty"><div><h1>What can I help with?</h1><p>Ask Matrix anything.</p></div></div></main>
+<div class="composer-wrap"><div class="composer"><textarea id="input" rows="1" placeholder="Message Matrix..."></textarea><button class="send" id="send" title="Send">↑</button></div><div class="status" id="status"></div></div>
+</div>
+<script>
+const messagesEl=document.getElementById('messages'),input=document.getElementById('input'),send=document.getElementById('send'),statusEl=document.getElementById('status'),empty=document.getElementById('empty'),app=document.getElementById('app');
+let history=[],busy=false;
+function addMessage(role,text){
+  if(empty) empty.remove();
+  const row=document.createElement('div'); row.className='row '+role;
+  const bubble=document.createElement('div'); bubble.className='bubble'; bubble.textContent=text; row.appendChild(bubble); messagesEl.appendChild(row); messagesEl.scrollTop=messagesEl.scrollHeight; return bubble;
+}
+function setStatus(t){statusEl.textContent=t||''}
+async function ask(){
+  const text=input.value.trim(); if(!text||busy)return;
+  busy=true;send.disabled=true;input.value='';resize();setStatus('Thinking…');
+  addMessage('user',text);history.push({role:'user',content:text});
+  const bubble=addMessage('assistant','');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history})});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Request failed');
+    const answer=data.content||data.message||'I could not generate a response.';
+    bubble.textContent=answer;history.push({role:'assistant',content:answer});
+  }catch(e){bubble.textContent='Sorry, I could not reach the AI service right now.';console.error(e)}
+  finally{busy=false;send.disabled=false;setStatus('');input.focus();messagesEl.scrollTop=messagesEl.scrollHeight}
+}
+function resize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,120)+'px'}
+input.addEventListener('input',resize);input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});send.addEventListener('click',ask);
+document.getElementById('minBtn').onclick=()=>{app.style.display=app.style.display==='none'?'flex':'none'};
+document.getElementById('closeBtn').onclick=()=>{document.body.innerHTML='<div style="margin:auto;color:#777;font:13px Segoe UI,Arial">Matrix closed.</div>'};
+input.focus();
+</script>
+</body>
+</html>
