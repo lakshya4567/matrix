@@ -64,7 +64,7 @@ function renderAuth(isRegister=false){
         localStorage.setItem('matrix_user',data.username);
         authToken=data.token;
         currentUsername=data.username;
-        loadChatApp();
+        RenderChatApp();
       }
     }catch(err){alert(err.message);}
   };
