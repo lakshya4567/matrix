@@ -13,6 +13,7 @@ app.use(express.static(__dirname));
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretmatrixkey';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // Connect to Database
 mongoose.connect(MONGO_URI)
@@ -90,7 +91,7 @@ app.get('/api/history', verifyToken, async (req, res) => {
   }
 });
 
-// Routes: Chat Endpoint (Stores & Proxies to AI)
+// Routes: Chat Endpoint (Calls OpenRouter & Stores in DB)
 app.post('/api/chat', verifyToken, async (req, res) => {
   try {
     const { messages } = req.body; // Array of { role, content }
@@ -99,9 +100,27 @@ app.post('/api/chat', verifyToken, async (req, res) => {
     // Save user message to DB
     await Message.create({ userId: req.user.id, role: 'user', content: latestUserMessage });
 
-    // TODO: Integrate your actual AI API call here (OpenAI, Anthropic, or custom endpoint)
-    // For demonstration, we simulate a response:
-    const aiResponseContent = `Matrix received: "${latestUserMessage}"`;
+    // Call OpenRouter API
+    const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://matrix-chatbot.onrender.com', // Optional site URL
+        'X-Title': 'Matrix Chatbot' // Optional site name
+      },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-chat:free', // You can change this to any OpenRouter model
+        messages: messages
+      })
+    });
+
+    const data = await aiResponse.json();
+    if (!aiResponse.ok) {
+      throw new Error(data.error?.message || 'OpenRouter API failed');
+    }
+
+    const aiResponseContent = data.choices[0].message.content;
 
     // Save assistant response to DB
     await Message.create({ userId: req.user.id, role: 'assistant', content: aiResponseContent });
@@ -109,7 +128,7 @@ app.post('/api/chat', verifyToken, async (req, res) => {
     res.json({ content: aiResponseContent });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'AI processing failed' });
+    res.status(500).json({ error: e.message || 'AI processing failed' });
   }
 });
 
