@@ -14,6 +14,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretmatrixkey';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
@@ -110,7 +111,7 @@ app.get('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
 
 app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
   try {
-    const { messages } = req.body;
+    const { messages, modelChoice } = req.body;
     const chatId = req.params.chatId;
 
     const chat = await Chat.findOne({ _id: chatId, userId: req.user.id });
@@ -127,29 +128,8 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
 
     let aiResponseContent = '';
 
-    try {
-      // 1. Try Google Gemini as Primary
-      const geminiContents = messages.map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-      }));
-
-      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: geminiContents })
-      });
-
-      const geminiData = await geminiRes.json();
-      if (!geminiRes.ok) {
-        throw new Error(geminiData.error?.message || 'Gemini failed');
-      }
-
-      aiResponseContent = geminiData.candidates[0].content.parts[0].text;
-    } catch (geminiErr) {
-      console.warn('Gemini primary failed or busy, falling back to OpenRouter:', geminiErr.message);
-
-      // 2. Fallback to OpenRouter if Gemini throws an error (like 503 high demand)
+    if (modelChoice === 'openrouter') {
+      // OpenRouter Request
       const openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -163,17 +143,64 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
           messages: messages
         })
       });
+      const data = await openRouterRes.json();
+      if (!openRouterRes.ok) throw new Error(data.error?.message || 'OpenRouter failed');
+      aiResponseContent = data.choices[0].message.content;
 
-      const openRouterData = await openRouterRes.json();
-      if (!openRouterRes.ok) {
-        throw new Error(openRouterData.error?.message || 'Both primary and fallback AI APIs failed');
+    } else if (modelChoice === 'groq') {
+      // Groq Request (Llama 3.1 8B)
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: messages
+        })
+      });
+      const data = await groqRes.json();
+      if (!groqRes.ok) throw new Error(data.error?.message || 'Groq failed');
+      aiResponseContent = data.choices[0].message.content;
+
+    } else {
+      // Gemini (Primary) with OpenRouter Fallback
+      try {
+        const geminiContents = messages.map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }]
+        }));
+
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: geminiContents })
+        });
+
+        const geminiData = await geminiRes.json();
+        if (!geminiRes.ok) throw new Error(geminiData.error?.message || 'Gemini failed');
+        aiResponseContent = geminiData.candidates[0].content.parts[0].text;
+      } catch (geminiErr) {
+        console.warn('Gemini busy/failed, falling back to OpenRouter:', geminiErr.message);
+        const openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'openrouter/free',
+            messages: messages
+          })
+        });
+        const openRouterData = await openRouterRes.json();
+        if (!openRouterRes.ok) throw new Error('Both Gemini and backup OpenRouter failed');
+        aiResponseContent = openRouterData.choices[0].message.content;
       }
-
-      aiResponseContent = openRouterData.choices[0].message.content;
     }
 
     await Message.create({ chatId, role: 'assistant', content: aiResponseContent });
-
     res.json({ content: aiResponseContent, title: chat.title });
   } catch (e) {
     console.error('Chat endpoint error:', e);
