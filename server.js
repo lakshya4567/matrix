@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretmatrixkey';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
@@ -124,26 +125,53 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
 
     await Message.create({ chatId, role: 'user', content: latestUserMessage });
 
-    // Format messages for Google Gemini API
-    const geminiContents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
+    let aiResponseContent = '';
 
-    // Call Google Gemini API (Gemini 2.0 Flash)
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: geminiContents })
-    });
+    try {
+      // 1. Try Google Gemini as Primary
+      const geminiContents = messages.map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }));
 
-    const data = await aiResponse.json();
-    if (!aiResponse.ok) {
-      console.error('Gemini Error:', data);
-      throw new Error(data.error?.message || 'Gemini API failed');
+      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: geminiContents })
+      });
+
+      const geminiData = await geminiRes.json();
+      if (!geminiRes.ok) {
+        throw new Error(geminiData.error?.message || 'Gemini failed');
+      }
+
+      aiResponseContent = geminiData.candidates[0].content.parts[0].text;
+    } catch (geminiErr) {
+      console.warn('Gemini primary failed or busy, falling back to OpenRouter:', geminiErr.message);
+
+      // 2. Fallback to OpenRouter if Gemini throws an error (like 503 high demand)
+      const openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://matrix-chatbot.onrender.com',
+          'X-Title': 'Matrix Chatbot'
+        },
+        body: JSON.stringify({
+          model: 'openrouter/free',
+          messages: messages
+        })
+      });
+
+      const openRouterData = await openRouterRes.json();
+      if (!openRouterRes.ok) {
+        throw new Error(openRouterData.error?.message || 'Both primary and fallback AI APIs failed');
+      }
+
+      aiResponseContent = openRouterData.choices[0].message.content;
     }
 
-    const aiResponseContent = data.candidates[0].content.parts[0].text;
     await Message.create({ chatId, role: 'assistant', content: aiResponseContent });
 
     res.json({ content: aiResponseContent, title: chat.title });
