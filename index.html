@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Matrix</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#0b0b0c;color:#ddd;font-family:Inter,Segoe UI,Arial,sans-serif}body{display:flex;justify-content:center}.app{width:100%;max-width:760px;height:100%;display:flex;flex-direction:column;background:#0b0b0c;position:relative}.top{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #252526}.brand{font-size:15px;font-weight:600;color:#eee}.actions{display:flex;gap:7px}.icon{width:30px;height:30px;border:1px solid #303033;background:#151516;color:#aaa;border-radius:7px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}.icon:hover{background:#1d1d1f;color:#eee}.messages{flex:1;overflow:auto;padding:18px 16px 10px;scroll-behavior:smooth}.empty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center}.empty h1{font-size:20px;font-weight:500;color:#d8d8d8;margin:0 0 7px}.empty p{font-size:12px;color:#666;margin:0}.row{display:flex;margin:0 0 16px}.row.user{justify-content:flex-end}.user .bubble{max-width:78%;background:#202022;border:1px solid #2c2c2f;border-radius:13px;padding:8px 11px;color:#e5e5e5;font-size:13px;line-height:1.45;white-space:pre-wrap}.assistant .bubble{max-width:90%;padding:1px 0;color:#aaa;font-size:13px;line-height:1.55;white-space:pre-wrap}.composer-wrap{padding:9px 12px 12px}.composer{display:flex;align-items:flex-end;gap:7px;border:1px solid #303033;background:#121213;border-radius:11px;padding:7px}.composer textarea{flex:1;resize:none;min-height:32px;max-height:120px;border:0;outline:0;background:transparent;color:#eee;font:13px/1.45 inherit;padding:6px 5px}.composer textarea::placeholder{color:#5e5e61}.send{width:32px;height:32px;border:0;border-radius:8px;background:#dedede;color:#111;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center}.send:hover{background:#fff}.send:disabled{opacity:.35;cursor:default}.status{text-align:center;font-size:10px;color:#555;margin-top:5px;min-height:12px}
+/* Auth screen styles */
+.auth-container{margin:auto;padding:24px;width:100%;max-width:340px;background:#121213;border:1px solid #252526;border-radius:12px;text-align:center}
+.auth-container h2{margin-top:0;color:#eee;font-size:18px}
+.auth-container input{width:100%;padding:10px;margin:8px 0;background:#1a1a1c;border:1px solid #303033;border-radius:8px;color:#eee;font-size:13px}
+.auth-container button{width:100%;padding:10px;margin-top:10px;background:#dedede;border:0;border-radius:8px;font-weight:600;cursor:pointer}
+.auth-container button:hover{background:#fff}
+.auth-switch{margin-top:12px;font-size:12px;color:#777;cursor:pointer}
+.auth-switch:hover{color:#aaa}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+</div>
+
+<script>
+const app=document.getElementById('app');
+let authToken=localStorage.getItem('matrix_token')||null;
+let currentUsername=localStorage.getItem('matrix_user')||null;
+let history=[],busy=false;
+
+function renderAuth(isRegister=false){
+  app.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+      <div class="auth-container">
+        <h2>${isRegister?'Create Account':'Login to Matrix'}</h2>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button id="authBtn">${isRegister?'Sign Up':'Sign In'}</button>
+        <div class="auth-switch" id="switchBtn">
+          ${isRegister?'Already have an account? Login':'Need an account? Sign Up'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('authBtn').onclick=async()=>{
+    const u=document.getElementById('username').value.trim();
+    const p=document.getElementById('password').value.trim();
+    if(!u||!p)return alert('Please fill in all fields');
+
+    const endpoint=isRegister?'/api/auth/register':'/api/auth/login';
+    try{
+      const res=await fetch(endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({username:u,password:p})
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'Authentication failed');
+
+      if(isRegister){
+        alert('Registered successfully! Please login.');
+        renderAuth(false);
+      }else{
+        localStorage.setItem('matrix_token',data.token);
+        localStorage.setItem('matrix_user',data.username);
+        authToken=data.token;
+        currentUsername=data.username;
+        loadChatApp();
+      }
+    }catch(err){alert(err.message);}
+  };
+
+  document.getElementById('switchBtn').onclick=()=>renderAuth(!isRegister);
+}
+
+function renderChatApp(){
+  app.innerHTML=`
+    <header class="top">
+      <div class="brand">Matrix <span style="font-size:11px;color:#666;font-weight:normal">(${currentUsername})</span></div>
+      <div class="actions">
+        <button class="icon" id="logoutBtn" title="Logout">🚪</button>
+        <button class="icon" id="minBtn" title="Minimize">—</button>
+        <button class="icon" id="closeBtn" title="Close">×</button>
+      </div>
+    </header>
+    <main class="messages" id="messages">
+      <div class="empty" id="empty"><div><h1>What can I help with?</h1><p>Ask Matrix anything.</p></div></div>
+    </main>
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Message Matrix..."></textarea>
+        <button class="send" id="send" title="Send">↑</button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  `;
+
+  const messagesEl=document.getElementById('messages'),
+        input=document.getElementById('input'),
+        send=document.getElementById('send'),
+        statusEl=document.getElementById('status'),
+        empty=document.getElementById('empty');
+
+  document.getElementById('logoutBtn').onclick=()=>{
+    localStorage.removeItem('matrix_token');
+    localStorage.removeItem('matrix_user');
+    authToken=null;
+    currentUsername=null;
+    history=[];
+    renderAuth();
+  };
+
+  document.getElementById('minBtn').onclick=()=>{
+    const content = app.querySelector('.messages, .composer-wrap');
+    const isHidden = content.style.display === 'none';
+    app.querySelectorAll('.messages, .composer-wrap').forEach(el => el.style.display = isHidden ? '' : 'none');
+  };
+
+  document.getElementById('closeBtn').onclick=()=>{
+    app.innerHTML='<div style="margin:auto;color:#777;font:13px Segoe UI,Arial">Matrix closed.</div>';
+  };
+
+  function addMessage(role,text){
+    if(empty && empty.parentNode) empty.remove();
+    const row=document.createElement('div'); row.className='row '+role;
+    const bubble=document.createElement('div'); bubble.className='bubble'; bubble.textContent=text; 
+    row.appendChild(bubble); messagesEl.appendChild(row); 
+    messagesEl.scrollTop=messagesEl.scrollHeight; 
+    return bubble;
+  }
+
+  function setStatus(t){statusEl.textContent=t||''}
+
+  async function loadHistory(){
+    try{
+      const res=await fetch('/api/history',{
+        headers:{'Authorization':`Bearer ${authToken}`}
+      });
+      if(res.ok){
+        const dbMessages=await res.json();
+        dbMessages.forEach(m=>{
+          history.push({role:m.role,content:m.content});
+          addMessage(m.role,m.content);
+        });
+      }
+    }catch(e){console.error('Failed to load history',e);}
+  }
+  loadHistory();
+
+  async function ask(){
+    const text=input.value.trim(); if(!text||busy)return;
+    busy=true;send.disabled=true;input.value='';resize();setStatus('Thinking…');
+    addMessage('user',text);history.push({role:'user',content:text});
+    const bubble=addMessage('assistant','');
+    try{
+      const r=await fetch('/api/chat',{
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'Authorization':`Bearer ${authToken}`
+        },
+        body:JSON.stringify({messages:history})
+      });
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(data.error||'Request failed');
+      const answer=data.content||'I could not generate a response.';
+      bubble.textContent=answer;history.push({role:'assistant',content:answer});
+    }catch(e){
+      bubble.textContent='Sorry, I could not reach the AI service right now.';
+      console.error(e);
+    }finally{
+      busy=false;send.disabled=false;setStatus('');input.focus();messagesEl.scrollTop=messagesEl.scrollHeight;
+    }
+  }
+
+  function resize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,120)+'px'}
+  input.addEventListener('input',resize);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
+  send.addEventListener('click',ask);
+  input.focus();
+}
+
+// Initial check on page load
+if(!authToken){
+  renderAuth();
+}else{
+  renderChatApp();
+}
+</script>
+</body>
+</html>
