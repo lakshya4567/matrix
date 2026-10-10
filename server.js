@@ -12,7 +12,7 @@ app.use(express.static(__dirname));
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretmatrixkey';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
@@ -124,28 +124,26 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
 
     await Message.create({ chatId, role: 'user', content: latestUserMessage });
 
-    // Calling OpenRouter using the free models router
-    const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    // Format messages for Google Gemini API
+    const geminiContents = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    // Call Google Gemini API (Gemini 1.5 Flash)
+    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://matrix-chatbot.onrender.com',
-        'X-Title': 'Matrix Chatbot'
-      },
-      body: JSON.stringify({
-        model: 'openrouter/free', // Uses OpenRouter's automatic free model pool
-        messages: messages
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: geminiContents })
     });
 
     const data = await aiResponse.json();
     if (!aiResponse.ok) {
-      console.error('OpenRouter Error:', data);
-      throw new Error(data.error?.message || 'OpenRouter API failed');
+      console.error('Gemini Error:', data);
+      throw new Error(data.error?.message || 'Gemini API failed');
     }
 
-    const aiResponseContent = data.choices[0].message.content;
+    const aiResponseContent = data.candidates[0].content.parts[0].text;
     await Message.create({ chatId, role: 'assistant', content: aiResponseContent });
 
     res.json({ content: aiResponseContent, title: chat.title });
