@@ -131,7 +131,7 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
     }));
 
     // Call Google Gemini API (Gemini 2.0 Flash)
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: geminiContents })
