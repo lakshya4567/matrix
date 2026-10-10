@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Matrix</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#0b0b0c;color:#ddd;font-family:Inter,Segoe UI,Arial,sans-serif}body{display:flex;justify-content:center}.app{width:100%;max-width:980px;min-height:100vh;padding:20px;display:flex;flex-direction:column}.top{display:flex;justify-content:space-between;align-items:center;padding:8px 0 18px}.brand{font-size:22px;font-weight:700;letter-spacing:.2px}.actions{display:flex;gap:8px}.icon{width:32px;height:32px;border:1px solid #2a2a2d;border-radius:10px;background:#121214;color:#d9d9dc;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}.messages{flex:1;overflow:auto;padding:10px 0 16px}.row{display:flex;margin:8px 0}.row.user{justify-content:flex-end}.bubble{max-width:min(76%,560px);padding:12px 14px;border-radius:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.row.user .bubble{background:#1f8fff;color:#fff;border-bottom-right-radius:4px}.row.assistant .bubble{background:#17181a;color:#f3f5f7;border:1px solid #26282b;border-bottom-left-radius:4px}.composer-wrap{padding-top:8px}.composer{display:flex;align-items:flex-end;gap:10px;padding:10px 12px;border:1px solid #2a2a2d;background:#121214;border-radius:16px}.composer textarea{flex:1;resize:none;border:none;outline:none;background:transparent;color:#f3f4f6;font:inherit;max-height:120px;line-height:1.4;padding:4px 2px}.composer textarea::placeholder{color:#7d7d82}.send{width:38px;height:38px;border:none;border-radius:12px;background:#1f8fff;color:#fff;font-size:20px;cursor:pointer}.send:disabled{opacity:.5;cursor:not-allowed}.status{min-height:20px;color:#8b8d90;font-size:12px;padding:6px 2px 0}.empty{height:100%;display:flex;align-items:center;justify-content:center;color:#dfe4ea;text-align:center}.empty h1{font-size:clamp(2rem,4vw,2.6rem);margin:0 0 10px}.empty p{margin:0;color:#a7adb5}.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<header class="top"><div class="brand">Matrix</div><div class="actions"><button class="icon" id="minBtn" title="Minimize">—</button><button class="icon" id="closeBtn" title="Close">×</button></div></header>
+<main class="messages" id="messages"><div class="empty" id="empty"><div><h1>What can I help with?</h1><p>Ask Matrix anything.</p></div></div></main>
+<div class="composer-wrap"><div class="composer"><textarea id="input" rows="1" placeholder="Message Matrix..."></textarea><button class="send" id="send" title="Send">↑</button></div><div class="status" id="status"></div></div>
+</div>
+<script>
+const messagesEl=document.getElementById('messages'),input=document.getElementById('input'),send=document.getElementById('send'),statusEl=document.getElementById('status'),empty=document.getElementById('empty'),app=document.getElementById('app');
+let history=[],busy=false;
+function addMessage(role,text){
+  if(empty) empty.remove();
+  const row=document.createElement('div'); row.className='row '+role;
+  const bubble=document.createElement('div'); bubble.className='bubble'; bubble.textContent=text; row.appendChild(bubble); messagesEl.appendChild(row); messagesEl.scrollTop=messagesEl.scrollHeight; return bubble;
+}
+function setStatus(t){statusEl.textContent=t||''}
+async function ask(){
+  const text=input.value.trim(); if(!text||busy)return;
+  busy=true;send.disabled=true;input.value='';resize();setStatus('Thinking…');
+  addMessage('user',text);history.push({role:'user',content:text});
+  const bubble=addMessage('assistant','');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history})});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Request failed');
+    const answer=data.content||data.message||'I could not generate a response.';
+    bubble.textContent=answer;history.push({role:'assistant',content:answer});
+  }catch(e){bubble.textContent='Sorry, I could not reach the AI service right now.';console.error(e)}
+  finally{busy=false;send.disabled=false;setStatus('');input.focus();messagesEl.scrollTop=messagesEl.scrollHeight}
+}
+function resize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,120)+'px'}
+input.addEventListener('input',resize);input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});send.addEventListener('click',ask);
+document.getElementById('minBtn').onclick=()=>{app.style.display=app.style.display==='none'?'flex':'none'};
+document.getElementById('closeBtn').onclick=()=>{document.body.innerHTML='<div style="margin:auto;color:#777;font:13px Segoe UI,Arial">Matrix closed.</div>'};
+input.focus();
+</script>
+</body>
+</html>
